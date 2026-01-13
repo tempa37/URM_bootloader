@@ -99,6 +99,8 @@ static void send_ack(uint16_t packet);
 void OS_usave_packet(uint16_t rx_len);
 void ERROR_handler(uint8_t exception_code);
 static void uart_tx(const uint8_t *buf, uint16_t len);
+uint16_t FW_CalcCrc_ExcludeTail2(void);
+static inline uint16_t swap_bytes16(uint16_t x);
 /* USER CODE END PFP */
 
 /* Private user code ---------------------------------------------------------*/
@@ -133,7 +135,10 @@ void JumpToApp(void) {
     while (1) { /* не придём сюда */ }
 }
 
-
+static inline uint16_t swap_bytes16(uint16_t x)
+{
+    return (uint16_t)((x >> 8) | (x << 8));
+}
 
 static int Flash_ReadPageToBuf(uint32_t pageBase)
 {
@@ -260,6 +265,22 @@ static void send_ack(uint16_t packet)
     
     
     uart_tx(resp, 6);
+}
+
+
+uint16_t FW_CalcCrc_ExcludeTail2(void)
+{
+    const uint32_t start = APP_ADDR;
+    const uint32_t end_inclusive = END_APP_ADDR;
+
+    uint32_t len = (end_inclusive - start + 1u);
+    //uint32_t len = (end_inclusive - start);
+    if (len < 2u) {
+        return 0xFFFFu; // или 0, как удобнее обрабатывать ошибку
+    }
+
+    len -= 2u; // исключаем последние 2 байта (CRC)
+    return mbcrc((unsigned char *)start, (int32_t)len);
 }
 
 
@@ -513,25 +534,28 @@ int main(void)
     volatile uint16_t flag2 = *(volatile uint16_t *)UPDATE_FLAG2;
     
     
+    volatile uint16_t crc_os = FW_CalcCrc_ExcludeTail2();
+    
+    crc_os = swap_bytes16(crc_os);
+    
+    volatile uint16_t OS = *(volatile uint16_t *)(END_APP_ADDR - 1);
+    
     
     
     if(flag == 0x1111u)
     {
       Update();
     }
-    else if((flag == 0xFFFFu) && ( flag2 == 0x1111u))
-    {
-      delay(15000);
-      tick++;
-      volatile uint16_t temp = *(volatile uint16_t *)APP_ADDR;
-      if((tick > UPDATE_TIMEOUT_LOOPS) && (temp != 0xFFFFu))
-      {
-        Update();
-      }
-    }
     else
     {
-        JumpToApp();
+            if(crc_os == OS)
+            {
+              JumpToApp();
+            }
+            else
+            {
+              Update();
+            }
     }
     /* USER CODE END WHILE */
 
