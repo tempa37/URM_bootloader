@@ -378,33 +378,27 @@ void MY_UARTEx_RxEventCallback(uint16_t Size)
     uint16_t checksum = 0;
     checksum = mbcrc(receive_buf, (rx_length-2)); //make CRC data    
     
-    if ( (rx_length <= 2) ||
-         ( (receive_buf[rx_length - 2] == (uint8_t)((checksum >> 8) & 0xFF)) &&
-           (receive_buf[rx_length - 1] == (uint8_t)(checksum & 0xFF)) ) )
-    {
-      if(receive_buf[0] == ID_1)
-      {
-
-          switch (receive_buf[1])
-          {
-
-               case 0x2A:
-                OS_usave_packet(rx_length);
-                break;
-                  
-               default:                                                           //errors handler
-                ERROR_handler(MODBUS_ILLEGAL_FUNCTION);                           //MODBUS ILLEGAL FUNCTION//
-                break;
-          }       
-      }
-      else
-      { 
-          SwitchToReceive();
-      }
+    if ((rx_length <= 2) ||
+        (receive_buf[rx_length - 2] != (uint8_t)((checksum >> 8) & 0xFF)) ||
+        (receive_buf[rx_length - 1] != (uint8_t)(checksum & 0xFF))) {
+        SwitchToReceive();
+        return;
     }
-    else 
+
+    if (receive_buf[0] != ID_1) {
+        SwitchToReceive();
+        return;
+    }
+
+    switch (receive_buf[1])
     {
-      SwitchToReceive();
+         case 0x2A:
+          OS_usave_packet(rx_length);
+          break;
+            
+         default:                                                           //errors handler
+          ERROR_handler(MODBUS_ILLEGAL_FUNCTION);                           //MODBUS ILLEGAL FUNCTION//
+          break;
     }
 }
 
@@ -458,18 +452,6 @@ void Update(void)
 }
     
     
-void delay(uint16_t time) {
-
-    for (int i = 0; i < time; i++) {
-        __NOP();
-    }
-    
-}
-
-
-
-
-
 void SwitchToReceive(void) {
   
   
@@ -550,7 +532,6 @@ int main(void)
   while (1)
   {
     volatile uint16_t flag = *(volatile uint16_t *)UPDATE_FLAG;
-    volatile uint16_t flag2 = *(volatile uint16_t *)UPDATE_FLAG2;
     volatile uint16_t OS_1st_word = *(volatile uint16_t *)(APP_ADDR +2);
     volatile uint16_t crc_os = 0;
     
