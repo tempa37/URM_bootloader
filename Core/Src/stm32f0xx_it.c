@@ -29,6 +29,7 @@
 /* USER CODE BEGIN TD */
 extern void MY_UARTEx_RxEventCallback(uint16_t Size);
 extern uint8_t receive_buf[buf_size_rx];
+extern volatile uint32_t tick;
 /* USER CODE END TD */
 
 /* Private define ------------------------------------------------------------*/
@@ -127,7 +128,7 @@ void PendSV_Handler(void)
 void SysTick_Handler(void)
 {
   /* USER CODE BEGIN SysTick_IRQn 0 */
-
+  if (tick < 0xFFFFFFFFu) tick++; // tick = миллисекунды
   /* USER CODE END SysTick_IRQn 0 */
 
   /* USER CODE BEGIN SysTick_IRQn 1 */

@@ -50,8 +50,13 @@ typedef void (*pAppEntry)(void);
 #define IS_IN_SAME_PAGE(addr, base) (((addr) & ~(FLASH_PAGE_SIZE-1u)) == (base)) //проверка, лежитат ли адреса на странице
 #define CONFIG_PAGE_BASE   0x08007C00  // 0x08007C00 Адрес страницы с настройками калибровки и прочее
 
-uint32_t tick = 0;
+volatile uint32_t tick = 0;
 volatile uint16_t number = 1;
+
+
+
+volatile uint16_t time_x = 0;
+#define TIME_X_MAX         30
 
 static uint16_t s_pageBuf[FLASH_PAGE_SIZE/2];  // 1 КБ = 512 halfword
 /* USER CODE END Includes */
@@ -101,6 +106,7 @@ void ERROR_handler(uint8_t exception_code);
 static void uart_tx(const uint8_t *buf, uint16_t len);
 uint16_t FW_CalcCrc_ExcludeTail2(void);
 static inline uint16_t swap_bytes16(uint16_t x);
+//void SysTick_Handler(void);
 /* USER CODE END PFP */
 
 /* Private user code ---------------------------------------------------------*/
@@ -296,6 +302,7 @@ void OS_usave_packet(uint16_t rx_len)
     
     if(number == pkt_num)
     {
+      time_x = 1;
       uint16_t i;
       /* записываем payload пополам: два байта = half‑word */
       for (i = 0; (i+1) < data_len; i += 2) {
@@ -325,8 +332,10 @@ void OS_usave_packet(uint16_t rx_len)
       if (pkt_num == total_pkts) {
           uint16_t temp = 0x0000;
           flash_program_halfword(UPDATE_FLAG2, temp);
+          flash_program_halfword(UPDATE_FLAG, 0xFFFFu);
           flash_lock();
           //JumpToApp();
+          time_x = 0;
       }
     }
     else
@@ -334,6 +343,7 @@ void OS_usave_packet(uint16_t rx_len)
       send_ack(0xFFFF);
       flash_program_halfword(UPDATE_FLAG, 0x1111u);
       flash_lock();
+      time_x = 0;
     }
 }
 
@@ -360,15 +370,20 @@ void MY_UARTEx_RxEventCallback(uint16_t Size)
 {  
     uint16_t rx_length = Size;
     
+    if(!rx_length)
+      return;
+    
     tick = 0;
     
     uint16_t checksum = 0;
     checksum = mbcrc(receive_buf, (rx_length-2)); //make CRC data    
     
-    if ((receive_buf[rx_length - 2] == (uint8_t)((checksum >> 8) & 0xFF)) && 
-       (receive_buf[rx_length - 1] == (uint8_t)(checksum & 0xFF))) {
-         
-      if(receive_buf[0] == ID_1){
+    if ( (rx_length <= 2) ||
+         ( (receive_buf[rx_length - 2] == (uint8_t)((checksum >> 8) & 0xFF)) &&
+           (receive_buf[rx_length - 1] == (uint8_t)(checksum & 0xFF)) ) )
+    {
+      if(receive_buf[0] == ID_1)
+      {
 
           switch (receive_buf[1])
           {
@@ -380,15 +395,18 @@ void MY_UARTEx_RxEventCallback(uint16_t Size)
                default:                                                           //errors handler
                 ERROR_handler(MODBUS_ILLEGAL_FUNCTION);                           //MODBUS ILLEGAL FUNCTION//
                 break;
-           }       
-         }
-        else{ 
+          }       
+      }
+      else
+      { 
           SwitchToReceive();
-        }
-    } else {
+      }
+    }
+    else 
+    {
       SwitchToReceive();
     }
-  }
+}
 
 
 
@@ -472,8 +490,6 @@ void SwitchToReceive(void) {
 }
 
 
-
-
 /* USER CODE END 0 */
 
 /**
@@ -519,6 +535,9 @@ int main(void)
   LL_USART_EnableDMAReq_RX(USART1);
   
   
+  
+  SystemCoreClockUpdate();                 // обновить SystemCoreClock
+  SysTick_Config(SystemCoreClock / 1000u); // 1 мс тик
   SwitchToReceive();
   /* USER CODE END 2 */
 
@@ -532,14 +551,19 @@ int main(void)
   {
     volatile uint16_t flag = *(volatile uint16_t *)UPDATE_FLAG;
     volatile uint16_t flag2 = *(volatile uint16_t *)UPDATE_FLAG2;
+    volatile uint16_t OS_1st_word = *(volatile uint16_t *)(APP_ADDR +2);
+    volatile uint16_t crc_os = 0;
     
-    
-    volatile uint16_t crc_os = FW_CalcCrc_ExcludeTail2();
-    
+    if(OS_1st_word != 0xFFFF)
+    {
+    crc_os = FW_CalcCrc_ExcludeTail2();
     crc_os = swap_bytes16(crc_os);
+    }
+    
+    
     
     volatile uint16_t OS = *(volatile uint16_t *)(END_APP_ADDR - 1);
-    
+
     
     
     if(flag == 0x1111u)
@@ -548,14 +572,27 @@ int main(void)
     }
     else
     {
-            if(crc_os == OS)
+            if((crc_os == OS) && (OS_1st_word != 0xFFFF))
             {
               JumpToApp();
             }
             else
             {
-              Update();
+              if(time_x && (OS_1st_word != 0xFFFF))
+              {
+                if(time_x >= TIME_X_MAX)
+                {  
+                  Update();
+                  time_x = 0;
+                }
+              }
             }
+    }
+    
+    
+    if (tick >= 1000u) {
+    tick -= 1000u;   
+    time_x++;        // прошло 1 сек и более
     }
     /* USER CODE END WHILE */
 
