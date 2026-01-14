@@ -129,22 +129,36 @@ void JumpToApp(void) {
     LL_DMA_DisableChannel(DMA1, LL_DMA_CHANNEL_3);
     LL_AHB1_GRP1_ForceReset(LL_AHB1_GRP1_PERIPH_DMA1);
     LL_AHB1_GRP1_ReleaseReset(LL_AHB1_GRP1_PERIPH_DMA1);
+    DMA1->IFCR = 0xFFFFFFFFu;
 
     // 5) отключить и сбросить NVIC
     NVIC_DisableIRQ(USART1_IRQn);
     NVIC_ClearPendingIRQ(USART1_IRQn);
+    NVIC->ICER[0] = 0xFFFFFFFFu;
+    NVIC->ICPR[0] = 0xFFFFFFFFu;
 
     // 6) Получаем адрес Reset_Handler приложения
     pAppEntry entry = (pAppEntry)app_vec[1];
     // 7) Прыгаем в приложение
+    
+    SysTick->CTRL = 0;
+    SysTick->LOAD = 0;
+    SysTick->VAL  = 0;
+    
+    
+    
     entry();
     while (1) { /* не придём сюда */ }
 }
+
+
 
 static inline uint16_t swap_bytes16(uint16_t x)
 {
     return (uint16_t)((x >> 8) | (x << 8));
 }
+
+
 
 static int Flash_ReadPageToBuf(uint32_t pageBase)
 {
@@ -155,6 +169,8 @@ static int Flash_ReadPageToBuf(uint32_t pageBase)
     }
     return 0;
 }
+
+
 
 static int Flash_ErasePage(uint32_t pageBase)
 {
@@ -226,9 +242,13 @@ static inline void flash_unlock(void) {
     }
 }
 
+
+
 static inline void flash_lock(void) {
     FLASH->CR |= FLASH_CR_LOCK;
 }
+
+
 
 /* программирует в флеш half‑word, возвращает 0 при успехе */
 static uint8_t flash_program_halfword(uint32_t addr, uint16_t data) {
@@ -376,7 +396,11 @@ void MY_UARTEx_RxEventCallback(uint16_t Size)
     tick = 0;
     
     uint16_t checksum = 0;
-    checksum = mbcrc(receive_buf, (rx_length-2)); //make CRC data    
+    
+    if(rx_length > 2)
+    {
+      checksum = mbcrc(receive_buf, (rx_length-2)); //make CRC data    
+    }
     
     if ( (rx_length <= 2) ||
          ( (receive_buf[rx_length - 2] == (uint8_t)((checksum >> 8) & 0xFF)) &&
@@ -457,17 +481,6 @@ void Update(void)
     number = 1;
 }
     
-    
-void delay(uint16_t time) {
-
-    for (int i = 0; i < time; i++) {
-        __NOP();
-    }
-    
-}
-
-
-
 
 
 void SwitchToReceive(void) {
